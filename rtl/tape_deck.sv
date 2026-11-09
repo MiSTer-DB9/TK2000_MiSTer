@@ -26,7 +26,9 @@
 // while turbo is active, and a 64-step bar. Hint (rules 25-28): while the
 // tape is loaded, rewound and stopped, the box says TYPE LOADT <ret> - the
 // TK2000 command that loads the next file from tape, the same for every CT2;
-// it goes away when Return is pressed. Everything runs on clk_sys, so no
+// it goes away when Return is pressed. If instead the ROM is still waiting
+// on an empty drive (Disk interface On, no disk in D1), the box says
+// PRESS F2 FOR BASIC - the TK2000 RESET keys (warm reset, rtl/reset_ctrl.sv). Everything runs on clk_sys, so no
 // clock-domain crossing is needed; the overlay is mixed into the RGB after
 // the machine and before the framework's scaler.
 //
@@ -49,6 +51,7 @@ module tape_deck
 	input             overlay_en,   // OSD Tape overlay = On
 	input      [10:0] ps2_key,
 	input             turbo_active, // from tk2000.v (for the "x7")
+	input             disk_wait,    // ROM waiting on an empty drive (reset_ctrl)
 
 	output            cas_level,
 	output            playing,
@@ -170,7 +173,8 @@ always @(posedge clk) begin
 end
 
 wire show_bar  = overlay_en && loaded && playing;
-wire show_hint = overlay_en && loaded && !playing && at_start && !hint_off;
+wire show_disk = overlay_en && loaded && !playing && disk_wait;
+wire show_hint = show_disk || (overlay_en && loaded && !playing && at_start && !hint_off);
 
 // ------------------------------------------------------------------ overlay
 // Pixels are 7.16 MHz (every other clk_sys), as CE_PIXEL samples them.
@@ -192,7 +196,7 @@ always @(posedge clk) begin
 end
 
 localparam CHARS = 21;
-wire  [4:0] chars = show_bar ? 5'd21 : 5'd12;
+wire  [4:0] chars = show_bar ? 5'd21 : show_disk ? 5'd18 : 5'd12;
 wire  [9:0] box_w = {2'd0, chars, 3'd0} + 10'd4;
 wire  [8:0] box_h = show_bar ? 9'd18 : 9'd12;
 wire  [9:0] x0 = 10'd4;
@@ -229,6 +233,12 @@ always @(*) begin
 		5'd19: ch = fast ? "x" : " ";
 		5'd20: ch = fast ? "7" : " ";
 		default: ch = " ";
+	endcase else if (show_disk) case (col)
+		5'd0: ch = "P"; 5'd1: ch = "R"; 5'd2: ch = "E"; 5'd3: ch = "S"; 5'd4: ch = "S";
+		5'd6: ch = "F"; 5'd7: ch = "2";
+		5'd9: ch = "F"; 5'd10: ch = "O"; 5'd11: ch = "R";
+		5'd13: ch = "B"; 5'd14: ch = "A"; 5'd15: ch = "S"; 5'd16: ch = "I"; 5'd17: ch = "C";
+		default: ch = " ";
 	endcase else case (col)
 		5'd0: ch = "T"; 5'd1: ch = "Y"; 5'd2: ch = "P"; 5'd3: ch = "E";
 		5'd5: ch = "L"; 5'd6: ch = "O"; 5'd7: ch = "A"; 5'd8: ch = "D"; 5'd9: ch = "T";
@@ -251,6 +261,9 @@ function automatic [7:0] glyph(input [7:0] c, input [2:0] r);
 			"P": g = 64'h7C66667C60606000;  "E": g = 64'h7E60607C60607E00;
 			"Y": g = 64'h6666663C18181800;  "L": g = 64'h6060606060607E00;
 			"O": g = 64'h3C66666666663C00;  "D": g = 64'h786C6666666C7800;
+			"R": g = 64'h7C66667C786C6600;  "S": g = 64'h3C66603C06663C00;
+			"F": g = 64'h7E60607C60606000;  "B": g = 64'h7C66667C66667C00;
+			"I": g = 64'h3C18181818183C00;  "C": g = 64'h3C66606060663C00;
 			"x": g = 64'h0000663C183C6600;
 			C_PLAY: g = 64'h4060707870604000;
 			C_RET:  g = 64'h0002022262FE6020;

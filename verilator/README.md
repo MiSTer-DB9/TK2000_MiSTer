@@ -26,7 +26,9 @@ make nibtool         # host tool for the DSK<->NIB codec
 | `--key-hold`, `--key-gap` | frames per key press / between keys (default 3/3) |
 | `--joy <frame>:<hexmask>` | joystick bits 0 R,1 L,2 D,3 U,4 btn1,5 btn2 |
 | `--reset-at-frame <n>` | pulse reset |
-| `--no-disk-rom` | OSD **Machine > Disk interface: Off** (needed for tapes: otherwise the machine waits on the empty drive) |
+| `--no-disk-rom` | OSD **Machine > Disk interface: Off** (default Auto: fitted only when drive 1 has a disk at reset, so tapes need no flag) |
+| `--disk-rom-on` | OSD **Machine > Disk interface: On** (an empty drive waits until F2 or a disk) |
+| `--warm-reset-at-frame <n>` | OSD **Warm reset (F2)** at frame n (repeatable); in `--send-keys`, `\f` presses F2 |
 | `--tape <f.ct2>` / `--tape-frame <n>` | load a CT2 tape at frame n; it starts when the ROM reads the tape (`LOADT`) |
 | `--tape-normal` / `--tape-overlay-off` | OSD Tape speed Normal (default 7x) / Tape overlay Off |
 | `--tape-swap <frame>:<file>` | load another tape later (multi-part tapes) |
@@ -46,7 +48,7 @@ Headless runs at ~17 frames/s (about 3.5x slower than real time).
 ## Tapes
 
 ```bash
-./obj_dir/Vemu --headless --no-disk-rom --send-keys '100:LOADT\n' \
+./obj_dir/Vemu --headless --send-keys '100:LOADT\n' \
     --tape ../software/mister11/games/TK2000/Karateka.ct2 --tape-frame 250 --stop-at-frame 20000 --screenshot-every 1000
 ```
 

@@ -17,7 +17,18 @@ Updated to MiSTer by alanswx
 
 This can use DSK or NIB files. 
 
-"LOAD *.NIBDSK" in the menu and wait for the TK2000 to boot. Sometimes its necessary to go back to the OSD menu, and select the "RESET" option after loading a .NIB file.
+Load a disk in **Pri. drive (D1)** and the TK2000 boots it (with **Disk
+interface** on Auto, a disk inserted while the machine is in BASIC reboots it
+into the disk).
+
+#### Reset
+
+- **F2** (or OSD **Warm reset (F2)**) is the TK2000 **RESET** keys: the program
+  stops and you get the BASIC `>` prompt, RAM kept, the drive is not tried.
+  Like Ctrl-Reset on an Apple II, it is also the way out of an empty drive
+  that is waiting for a disk.
+- **Apply and reset** (and the board's reset button) is a cold start: the
+  TK2000 boots the disk if the disk interface is there, otherwise BASIC.
 
 #### OSD
 
@@ -27,13 +38,30 @@ TK2000
   Drive (D2)
   Tape               *.CT2
   Load ROM           (games/TK2000/boot0.rom by default)
-  Machine  >   Disk interface On/Off, Tape speed 7x/Normal,
+  Machine  >   Disk interface Auto/On/Off, Tape speed 7x/Normal,
                Rewind tape, Tape play/stop
-  Video    >   Display Color/B&W/Green/Amber, Tape overlay On/Off
+  Video    >   Display Color/B&W/Green/Amber, Aspect ratio, Scale,
+               Scandoubler Fx, Tape overlay On/Off
   Audio    >   Tape audio Off/On
+  Warm reset (F2)
    Changes pending
   Apply and reset
 ```
+
+**Disk interface**: **Auto** (default) fits the disk interface only when D1
+holds a disk at reset, so with just a tape the TK2000 starts in BASIC. **On**
+is a machine with the interface always fitted: with D1 empty it waits on the
+drive until you insert a disk or press F2. **Off** never fits it. Some tapes
+refuse to run with the interface fitted (Karateka: "RETIRE SUA INTERFACE").
+
+Aspect ratio, Scale (Normal / V-Integer / HV-Integer) and Scandoubler Fx
+(None / HQ2x / CRT scanlines; the scandoubler also turns on for a VGA monitor
+when the ini forces it) are the monitor and act at once. The TK2000 picture is
+282 x 192 with no border, so V-Integer is 5x (960 lines) on a 1080p display.
+**Original** is the TK2000's real picture shape, 1.26:1 (its 7.16 MHz pixels
+are 6/7 as wide as tall), a little narrower than 4:3. On HDMI leave
+Scandoubler Fx at None for the biggest integer picture: with it on, the scaler
+gets 384 lines and V-Integer drops to 2x.
 
 Display and Disk interface take effect at **Apply and reset** (the "Changes
 pending" line shows while they differ from the running machine). Media, the
@@ -41,8 +69,9 @@ tape settings and the tape buttons act at once.
 
 #### Tape (CT2)
 
-1. Set **Machine > Disk interface** to **Off** and **Apply and reset** (with the
-   disk interface on and no disk, the TK2000 waits for the drive).
+1. Start in BASIC (`>` prompt): with Disk interface on Auto and D1 empty it
+   already is. If the TK2000 is waiting on an empty drive, the hint says
+   `PRESS F2 FOR BASIC`.
 2. Load the `.ct2` in the **Tape** slot. A hint in the bottom-left corner says
    `TYPE LOADT ↵`.
 3. Type `LOADT` and press Return. The tape starts by itself when the ROM starts

@@ -783,6 +783,7 @@ static int opt_screenshot_every = 0;
 static std::string opt_screenshot_dir = ".";
 static std::string opt_screenshot_prefix = "frame";
 static std::vector<int> opt_reset_frames;
+static std::vector<int> opt_warm_frames;
 static std::vector<KeyEvent> key_events;   // sorted by frame (stable)
 static size_t key_event_pos = 0;
 static int key_gap_cycles = 0;
@@ -813,7 +814,9 @@ static void usage() {
 	printf("  --disk2 <file>                Insert image in drive 2\n");
 	printf("  --mount-frame <n>             Insert the drive 1 image at frame n instead of power-on\n");
 	printf("  --swap <frame>:<drive>:<file> Swap/insert an image at a frame (drive 1|2; empty file = eject). Repeatable\n");
-	printf("  --no-disk-rom                 OSD 'Disk Rom: Off' (boot to BASIC without trying the drive; use for tapes)\n");
+	printf("  --no-disk-rom                 OSD Disk interface: Off (default Auto: on only if drive 1 has a disk at reset)\n");
+	printf("  --disk-rom-on                 OSD Disk interface: On (an empty drive spins until F2 / a disk)\n");
+	printf("  --warm-reset-at-frame <n>     OSD Warm reset (F2) at frame n: RAM kept, ROM goes to BASIC. Repeatable\n");
 	printf("  --tape-normal                 OSD Tape speed: Normal (default 7x turbo while the tape plays)\n");
 	printf("  --tape-overlay-off            OSD Tape overlay: Off\n");
 	printf("  --tape <file.ct2>             Load a CT2 tape (OSD Tape slot); it starts when the ROM reads the tape (LOADT)\n");
@@ -829,7 +832,7 @@ static void usage() {
 	printf("  --screenshot-dir <dir>        Directory for PNGs (default .)\n");
 	printf("  --screenshot-prefix <name>    PNG name prefix (default 'frame' -> frame_0300.png)\n");
 	printf("  --send-keys <frame>:<text>    Type text starting at frame. Escapes: \\n Enter, \\b Backspace,\n");
-	printf("                                \\U \\D \\L \\R arrows, \\^X Ctrl+X, \\\\ backslash. Repeatable\n");
+	printf("                                \\U \\D \\L \\R arrows, \\f F2 (RESET), \\^X Ctrl+X, \\\\ backslash. Repeatable\n");
 	printf("  --key-hold <frames>           Frames each key is held (default %d)\n", opt_key_hold);
 	printf("  --key-gap <frames>            Frames between keys (default %d)\n", opt_key_gap);
 	printf("  --joy <frame>:<hexmask>       Set joystick bits from frame (0 R,1 L,2 D,3 U,4 btn1,5 btn2). Repeatable\n");
@@ -935,6 +938,7 @@ static void add_key_text(int frame, const std::string &text) {
 			if (n == 'L') { push(0x6B, true, false, false); continue; }
 			if (n == 'R') { push(0x74, true, false, false); continue; }
 			if (n == 'e') { push(0x76, false, false, false); continue; }
+			if (n == 'f') { push(0x06, false, false, false); continue; }   // F2 = TK2000 RESET
 			if (n == '^' && j + 1 < text.size()) {
 				unsigned char code; bool shift;
 				if (ascii_to_ps2(text[++j], code, shift)) push(code, false, false, true);
@@ -959,7 +963,7 @@ static inline void step() {
 		top->ps2_key = e.code | (e.ext ? 1 << 8 : 0) | (e.pressed ? 1 << 9 : 0) | (ps2_toggle ? 1 << 10 : 0);
 		key_gap_cycles = 20000;
 	}
-	if (tape_pulse > 0 && --tape_pulse == 0) { top->tape_rewind = 0; top->tape_play_toggle = 0; }
+	if (tape_pulse > 0 && --tape_pulse == 0) { top->tape_rewind = 0; top->tape_play_toggle = 0; top->warm_reset = 0; }
 	if (reset_hold > 0) {
 		top->reset = 1;
 		if (--reset_hold == 0) top->reset = 0;
@@ -1018,6 +1022,7 @@ static bool on_frame(int frame) {
 	for (auto &j : joy_events) if (j.frame == frame) joy_mask = j.mask;
 	top->joystick_0 = joy_mask;
 	for (int r : opt_reset_frames) if (r == frame) { printf("FRAME %d: reset\n", frame); reset_hold = 2000; }
+	for (int r : opt_warm_frames) if (r == frame) { printf("FRAME %d: warm reset\n", frame); top->warm_reset = 1; tape_pulse = 64; }
 
 	for (auto &d : opt_ram_dumps) if (d.first == frame) {
 		FILE *f = fopen(d.second.c_str(), "wb");
@@ -1086,7 +1091,9 @@ static int parse_args(int argc, char **argv) {
 		}
 		else if (a == "--reset-at-frame") opt_reset_frames.push_back(atoi(next().c_str()));
 		else if (a == "--sd-ack-delay") blockdevice.sd_ack_delay = atoi(next().c_str());
-		else if (a == "--no-disk-rom") top->disk_rom_off = 1;
+		else if (a == "--no-disk-rom") top->disk_mode = 2;
+		else if (a == "--disk-rom-on") top->disk_mode = 1;
+		else if (a == "--warm-reset-at-frame") opt_warm_frames.push_back(atoi(next().c_str()));
 		else if (a == "--tape-normal") top->tape_normal_speed = 1;
 		else if (a == "--tape-overlay-off") top->tape_overlay_off = 1;
 		else if (a == "--tape") { opt_tape = next(); }
@@ -1239,6 +1246,7 @@ int main(int argc, char** argv, char** env) {
 		if (ImGui::Button("Multi Step")) { run_enable = 0; multi_step = 1; }
 		ImGui::SliderInt("Multi step amount", &multi_step_amount, 8, 1024);
 		if (ImGui::Button("Reset core")) { reset_hold = 2000; } ImGui::SameLine();
+		if (ImGui::Button("Warm reset (F2)")) { top->warm_reset = 1; tape_pulse = 64; } ImGui::SameLine();
 		if (ImGui::Button("Screenshot")) { save_screenshot(video.count_frame); } ImGui::SameLine();
 		ImGui::Checkbox("CPU log", &cpu_log);
 		ImGui::Text("D1: %s  D2: %s", blockdevice.disk_name[0].c_str(), blockdevice.disk_name[1].c_str());
