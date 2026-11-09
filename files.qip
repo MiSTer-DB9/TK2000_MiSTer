@@ -10,6 +10,7 @@ set_global_assignment -name VERILOG_FILE rtl/peripheral/drive_ii.v
 set_global_assignment -name VERILOG_FILE rtl/peripheral/floppy_track.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/ct2_player.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/tape_deck.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/reset_ctrl.sv
 set_global_assignment -name VERILOG_FILE rtl/rom.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/bram.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/video/video_generator.sv

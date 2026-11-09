@@ -65,6 +65,7 @@ V_SRC = \
 	$(RTL)/peripheral/floppy_track.sv \
 	$(RTL)/ct2_player.sv \
 	$(RTL)/tape_deck.sv \
+	$(RTL)/reset_ctrl.sv \
 	$(RTL)/rom.v \
 	$(RTL)/bram.sv \
 	$(RTL)/video/video_generator.sv \

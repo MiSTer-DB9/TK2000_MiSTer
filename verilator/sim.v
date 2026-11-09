@@ -92,7 +92,8 @@ module emu (
 	input [24:0]		ioctl_addr,
 	input [7:0]		ioctl_dout,
 	input [7:0]		ioctl_index,
-	input			disk_rom_off,
+	input [1:0]		disk_mode,           // OSD Disk interface: 0 Auto, 1 On, 2 Off
+	input			warm_reset,          // OSD Warm reset (F2 works through ps2_key)
 	input			tape_rewind,
 	input			tape_play_toggle,
 	input			tape_normal_speed,   // OSD Tape speed = Normal
@@ -193,8 +194,10 @@ assign clock_14_s = clk_sys;
 
 // Resets
 wire pll_locked_s;
-reg por_reset_s =1'b1 ;  //   : std_logic := '1';
-reg reset_s;
+wire por_reset_s;    // cold reset (clears $3F4)
+wire reset_s;        // CPU + peripherals (cold or warm)
+wire disk_en_s;      // $C100 disk interface present
+wire disk_wait_s;    // ROM waiting on an empty drive
 
 // ROM
 wire [13:0] rom_addr_s;
@@ -268,7 +271,6 @@ wire [4:0] osd_g_s;
 wire [4:0] osd_b_s;
 wire [9:0] vga_x_s;
 wire [9:0] vga_y_s;
-reg [22:0] flash_clk = 1'b0;
 wire [31:0] menu_status;
 wire odd_line_s;
 wire step_sound_s;
@@ -348,7 +350,7 @@ tk2000 tk2000 (
     .read_write_o(per_we_s),
     .irq_n_i(1'b1),
     .nmi_n_i(1'b1),
-    .dis_rom_i(~disk_rom_off),   // OSD 'Disk Rom' (TK2000.sv: ~status[10])
+    .dis_rom_i(disk_en_s),       // rtl/reset_ctrl.sv, as in TK2000.sv
     // 1 enable peripheral
     .io_select_n_o(per_iosel_n_s),
     .dev_select_n_o(per_devsel_n_s),
@@ -389,6 +391,7 @@ tape_deck tape
 	.overlay_en(~tape_overlay_off),
 	.ps2_key(ps2_key),
 	.turbo_active(turbo_s),
+	.disk_wait(disk_wait_s),
 	.cas_level(tape_level),
 	.playing(tape_playing),
 	.loaded(tape_loaded),
@@ -445,29 +448,26 @@ wire joy1_p9_i= ~joystick_0[5];
    
   assign scanlines_en_s = 2'b00;
 
- // Glue Logic
-  // In the Apple ][, this was a 555 timer
-  always @(posedge clock_14_s) begin
-    reset_s <= por_reset_s |reset   ;
-	 /*
-    if((btn_n_i[4] == 1'b0 && btn_n_i[3] == 1'b0) || menu_status[0] == 1'b1 || pump_active_s == 1'b1) begin
-      por_reset_s <= 1'b1;
-      flash_clk <= {23{1'b0}};
-    end
-    else*/ 
-	 
-	 if( reset || pump_active_s == 1'b1) begin
-      por_reset_s <= 1'b1;
-      flash_clk <= {23{1'b0}};
-    end
-    else
-	 begin
-      if(flash_clk[22] == 1'b1) begin
-        por_reset_s <= 1'b0;
-      end
-      flash_clk <= flash_clk + 1;
-    end
-  end
+ // Resets and disk interface enable: same module and hookup as TK2000.sv.
+reg old_warm;
+always @(posedge clk_sys) old_warm <= warm_reset;
+
+reset_ctrl reset_ctrl
+(
+	.clk(clk_sys),
+	.cold_req(reset | pump_active_s),
+	.warm_req(warm_reset & ~old_warm),
+	.ps2_key(ps2_key),
+	.disk_mode(disk_mode),
+	.d1_mounted(disk_mount[0]),
+	.d1_insert(img_mounted[0] && img_size != 0),
+	.d1_motor(fd_disk_1),
+	.por_reset(por_reset_s),
+	.reset(reset_s),
+	.disk_en(disk_en_s),
+	.warm_active(),
+	.empty_spin(disk_wait_s)
+);
 /*
 dpram  #( .addr_width_g(16),.data_width_g(8)) ram (
 	.address_a	(ram_addr),
