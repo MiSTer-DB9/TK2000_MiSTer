@@ -27,7 +27,7 @@ module emu
 	input         RESET,
 
 	//Must be passed to hps_io module
-	inout  [48:0] HPS_BUS,
+	inout  [45:0] HPS_BUS,
 
 	//Base video clock. Usually equals to CLK_SYS.
 	output        CLK_VIDEO,
@@ -57,6 +57,12 @@ module emu
 	output        HDMI_FREEZE,
 	output        HDMI_BLACKOUT,
 	output        HDMI_BOB_DEINT,
+
+	input   [5:0] LFB_FMT,
+	input  [31:0] LFB_BASE,
+	input  [11:0] LFB_WIDTH,
+	input  [11:0] LFB_HEIGHT,
+	input  [13:0] LFB_STRIDE,
 
 `ifdef MISTER_FB
 	// Use framebuffer in DDRAM
@@ -260,7 +266,6 @@ assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 assign {SDRAM_DQ, SDRAM_A, SDRAM_BA, SDRAM_CLK, SDRAM_CKE, SDRAM_DQML, SDRAM_DQMH, SDRAM_nWE, SDRAM_nCAS, SDRAM_nRAS, SDRAM_nCS} = 'Z;
 assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;  
 
-assign VGA_SL = 0;
 assign VGA_F1 = 0;
 assign VGA_SCALER = 0;
 assign VGA_DISABLE = 0;
@@ -269,7 +274,7 @@ assign HDMI_BLACKOUT = 0;
 assign HDMI_BOB_DEINT = 0;
 
 assign AUDIO_S = 0;
-assign AUDIO_L = { 2'b0,spk_s,spk_s,12'b0};
+assign AUDIO_L = { 2'b0,spk_s,spk_s,12'b0} + ((status[15] && tape_playing) ? {3'b0, tape_level, 12'b0} : 16'd0);
 assign AUDIO_R = AUDIO_L;
 assign AUDIO_MIX = 0;
 
@@ -281,34 +286,48 @@ assign LED_USER  = led;
 assign LED_DISK  = 0;
 assign LED_POWER = 0;
 
-//wire [1:0] ar = status[9:8];
-
-assign VIDEO_ARX = 4; //(!ar) ? 12'd4 : (ar - 1'd1);
-assign VIDEO_ARY = 3; //(!ar) ? 12'd3 : 12'd0;
 
 `include "build_id.v" 
 localparam CONF_STR = {
 	"TK2000;;",
-	//"Apple-II;;",
 	"-;",
-//	"O89,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
-//	"O2,TV Mode,NTSC,PAL;",
-//	"O34,Noise,White,Red,Green,Blue;",
-	"O56,Display,Color,B&W,Green,Amber;",
+	"SC0,NIBDSKDO PO ,Pri. drive (D1);",
+	"SC1,NIBDSKDO PO ,Drive (D2);",
+	"F2,CT2,Tape;",
+	"F0,ROM,Load ROM;",
 	"-;",
-	"S0,NIBDSKDO PO ;",
-	"S1,NIBDSKDO PO ;",
-	"OA,Disk Rom,On,Off;",
-//	"OB,Color Mode,On,Off;",
+	"P1,Machine;",
+	"P2,Video;",
+	"P4,Audio;",
 	"-;",
-	"R0,Reset;",
+	"R[18],Warm reset (F2);",
+	"h0-,Changes pending;",
+	"R[0],Apply and reset;",
+
+	"P1O[17:16],Disk interface,Auto,On,Off;",
+	"P1O[13],Tape speed,7x,Normal;",
+	"P1-;",
+	"P1T[11],Rewind tape;",
+	"P1T[12],Tape play/stop;",
+
+	"P2O[6:5],Display,Color,B&W,Green,Amber;",
+	"P2-;",
+	"P2O[20:19],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+	"P2O[22:21],Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
+	"P2O[25:23],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"P2-;",
+	"P2O[14],Tape overlay,On,Off;",
+
+	"P4O[15],Tape audio,Off,On;",
+
+	"I,Tape ready (rewound),Tape format not supported;",
 	// [MiSTer-DB9-Pro BEGIN] - Saturn-first joy_type (canonical bit notation)
 	"-;",
 	"O[127:126],UserIO Joystick,Off,Saturn,DB9MD,DB15;",
 	"O[125],UserIO Players,1 Player,2 Players;",
 	// [MiSTer-DB9-Pro END]
 	"J,Fire 1,Fire 2;",
-	"V,v",`BUILD_DATE 
+	"V,v",`BUILD_DATE
 };
 
 
@@ -343,6 +362,7 @@ wire [24:0] ioctl_addr;
 wire  [7:0] ioctl_data;
 wire  [7:0] ioctl_index;
 reg 		ioctl_wait = 0;
+wire        rom_load = ioctl_download && (ioctl_index[5:0] == 6'd0);   // OSD Load ROM / boot0.rom
 
 //hps_io #(.CONF_STR(CONF_STR),.PS2DIV(1000),.VDNUM(2)) hps_io
 hps_io #(.CONF_STR(CONF_STR),.VDNUM(2)) hps_io
@@ -350,13 +370,15 @@ hps_io #(.CONF_STR(CONF_STR),.VDNUM(2)) hps_io
 	.clk_sys(clk_sys),
 	.HPS_BUS(HPS_BUS),
 	.EXT_BUS(),
-	.gamma_bus(),
+	.gamma_bus(gamma_bus),
 
 	.forced_scandoubler(forced_scandoubler),
 
 	.buttons(buttons),
 	.status(status),
-	.status_menumask({status[5]}),
+	.status_menumask({15'd0, cfg_pending}),
+	.info_req(tape_info_req),
+	.info(tape_info),
 	// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: USB-side joysticks renamed
 	.joystick_0(joy1_USB),
 	.joystick_1(joy2_USB),
@@ -427,7 +449,6 @@ always @(posedge CLK_VIDEO) begin
 	ce_pix <=  &div ;
 end
 
-assign CE_PIXEL = ce_pix;
 
 
 //-- Clocks
@@ -442,8 +463,10 @@ wire clock_dvi_s;
 
 // Resets
 wire pll_locked_s;
-reg por_reset_s =1'b1 ;  //   : std_logic := '1';
-wire reset_s;
+wire por_reset_s;    // cold reset (clears $3F4)
+wire reset_s;        // CPU + peripherals (cold or warm)
+wire disk_en_s;      // $C100 disk interface present
+wire disk_wait_s;    // ROM waiting on an empty drive
 
 // ROM
 wire [13:0] rom_addr_s;
@@ -500,9 +523,8 @@ wire disk2_en_s;
 wire [13:0] track_ram_addr_s;
 wire [7:0] track_ram_data_s;
 
-reg [22:0] flash_clk = 1'b0;
 reg [5:0] kbd_joy_s;  // Data pump
-reg pump_active_s = 1'b0  ;
+wire pump_active_s = rom_load;   // hold the machine in reset while a ROM loads
 
 
 
@@ -538,9 +560,16 @@ tk2000 tk2000 (
     .video_vbl_o(video_vbl_s),
     .video_ld194_o(video_ld194_s),
     // Cassete
-    .cas_i(1'b0),
+    .cas_i(tape_level),
     .cas_o(cas_o_s),
     .cas_motor_o(/* open */),
+    .cpu_ce_o(cpu_ce_s),
+    .cpu_sync_o(cpu_sync_s),
+    .cpu_addr_o(cpu_addr16_s),
+    .turbo_i(tape_turbo_req & ~(fd_disk_1 | fd_disk_2)),
+    .turbo_o(turbo_s),
+    .video_ram_addr_o(video_ram_addr_s),
+    .video_ram_data_i(video_ram_data_s),
     //cas_motor_s,
     // LPT
     .lpt_stb_o(/* open */),
@@ -556,7 +585,7 @@ tk2000 tk2000 (
     .read_write_o(per_we_s),
     .irq_n_i(1'b1),
     .nmi_n_i(1'b1),
-    .dis_rom_i(~status[10]),
+    .dis_rom_i(disk_en_s),
     // 1 enable peripheral
     .io_select_n_o(per_iosel_n_s),
     .dev_select_n_o(per_devsel_n_s),
@@ -566,6 +595,53 @@ tk2000 tk2000 (
 	
 );
 
+
+// ---------------------------------------------------------------- cassette
+// CT2 tape in the "Tape" file slot (ioctl index 2): deck, 7x turbo, status bar
+// and LOADT hint (rtl/tape_deck.sv, shared with the sim).
+wire        cpu_ce_s, cpu_sync_s, turbo_s;
+wire [15:0] cpu_addr16_s;
+wire [15:0] video_ram_addr_s;
+wire  [7:0] video_ram_data_s;
+wire        tape_level, tape_playing, tape_loaded, tape_turbo_req;
+wire        tape_info_req;
+wire  [7:0] tape_info;
+wire [23:0] rgb_overlay;
+wire        tape_load = ioctl_download && (ioctl_index[5:0] == 6'd2);
+reg         old_rewind, old_play;
+always @(posedge clk_sys) begin
+	old_rewind <= status[11];
+	old_play   <= status[12];
+end
+
+tape_deck tape
+(
+	.clk(clk_sys),
+	.cpu_ce(cpu_ce_s),
+	.cpu_sync(cpu_sync_s),
+	.cpu_addr(cpu_addr16_s),
+	.load(tape_load),
+	.load_wr(ioctl_wr),
+	.load_addr(ioctl_addr),
+	.load_data(ioctl_data),
+	.rewind(status[11] & ~old_rewind),
+	.play_toggle(status[12] & ~old_play),
+	.speed_7x(~status[13]),
+	.overlay_en(~status[14]),
+	.ps2_key(ps2_key),
+	.turbo_active(turbo_s),
+	.disk_wait(disk_wait_s),
+	.cas_level(tape_level),
+	.playing(tape_playing),
+	.loaded(tape_loaded),
+	.turbo_req(tape_turbo_req),
+	.info_req(tape_info_req),
+	.info(tape_info),
+	.hblank(HBlank),
+	.vblank(VBlank),
+	.rgb_in({video_r_s, video_g_s, video_b_s}),
+	.rgb_out(rgb_overlay)
+);
 
 keyboard #(.clkfreq_g(14000)) kb (
   	.clock_i	(clk_sys), //  --clock_28_s,
@@ -599,21 +675,29 @@ keyboard #(.clkfreq_g(14000)) kb (
   end
     
 // ROM
-tk2000_rom rom (
-    .clock	(clock_28_s),
-    .address(rom_addr_s),
-    .q		(rom_data_from_s)
+bram #(8,14,"ROMs/TK2000/tk2000.hex") rom (
+    .clock_a(clock_28_s),
+    .address_a(rom_addr_s),
+    .wren_a(1'b0),
+    .data_a(8'd0),
+    .q_a(rom_data_from_s),
+
+    .clock_b(clk_sys),
+    .address_b(ioctl_addr[13:0]),
+    .wren_b(rom_load & ioctl_wr & ~|ioctl_addr[24:14]),
+    .data_b(ioctl_data),
+    .q_b()
 );
 
 // 1 is monochrome
-wire 	   COLOR_LINE_CONTROL = video_color_s |  (status[6] |  status[5]);  // Color or B&W mode
+wire 	   COLOR_LINE_CONTROL = video_color_s |  (cfg[6] |  cfg[5]);  // Color or B&W mode
 
 // VGA
 vga_controller_appleii vga (
     .CLK_14M(clock_14_s),
     .VIDEO(video_bit_s),
     .COLOR_LINE(COLOR_LINE_CONTROL),
-    .SCREEN_MODE(status[6:5]),
+    .SCREEN_MODE(cfg[6:5]),
     .HBL(video_hbl_s),
     .VBL(video_vbl_s),
     .VGA_HS(video_hsync_n_s),
@@ -626,13 +710,47 @@ vga_controller_appleii vga (
     .VGA_B(video_b_s)
 );
 	
-	assign VGA_HS	= video_hsync_n_s;
-	assign VGA_VS	= video_vsync_n_s;
-	assign VGA_R	= video_r_s;
-	assign VGA_G	= video_g_s;
-	assign VGA_B	= video_b_s;	 
-//  assign VGA_DE = (video_blank_s);
-   assign VGA_DE =  ~(VBlank | HBlank);
+// ---------------------------------------------------------------- video out
+// The machine makes 15 kHz NTSC video: 280 pixels (7.16 MHz, ce_pix) x 192
+// lines, no border. video_mixer: scandoubler for 31 kHz VGA (Scandoubler Fx,
+// or forced by the ini), HQ2x / CRT scanlines, gamma. video_freak: aspect
+// ratio and integer scaling for the HDMI scaler. Aspect ratio, Scale and
+// Scandoubler Fx are the monitor, not the machine: they act at once and stay
+// out of "Changes pending" (~/dev2/video-standard.md).
+wire [21:0] gamma_bus;
+wire  [1:0] ar  = status[20:19];
+wire  [2:0] sfx = status[25:23];          // 0 None, 1 HQ2x, 2-4 CRT 25/50/75%
+wire  [2:0] sl  = sfx ? sfx - 3'd1 : 3'd0;
+wire        scandoubler = sfx != 3'd0 || forced_scandoubler;
+assign VGA_SL = sl[1:0];
+
+assign HSync = video_hsync_n_s;           // vga_controller_appleii: positive pulses
+assign VSync = video_vsync_n_s;
+wire [7:0] R = rgb_overlay[23:16];
+wire [7:0] G = rgb_overlay[15:8];
+wire [7:0] B = rgb_overlay[7:0];
+
+video_mixer #(.LINE_LENGTH(320), .GAMMA(1)) video_mixer
+(
+	.*,
+	.hq2x(sfx == 3'd1),
+	.freeze_sync()
+);
+
+video_freak video_freak
+(
+	.*,
+	.VGA_DE_IN(VGA_DE),
+	.VGA_DE(),
+	// Original: the real shape of the 282 x 192 active picture. 7.16 MHz NTSC
+	// dots have a pixel aspect of 6/7 (square-pixel rate 6.136 MHz / 7.159
+	// MHz), so 282*6 : 192*7 = 1692:1344 = 141:112 (1.26:1, not 4:3).
+	.ARX((!ar) ? 12'd141 : (ar - 1'd1)),
+	.ARY((!ar) ? 12'd112 : 12'd0),
+	.CROP_SIZE(12'd0),                     // 192 lines: 5x = 960 already fits 1080
+	.CROP_OFF(5'd0),
+	.SCALE({1'b0, status[22:21]})
+);
 
 
 
@@ -785,32 +903,47 @@ wire joy1_p9_i= ~joy1[5];
 
       
 
- // Glue Logic
-  // In the Apple ][, this was a 555 timer
-  always @(posedge clock_14_s) begin
-    reset_s <= por_reset_s |RESET |  buttons[1] | status[0];
-	 
-	 if(buttons[1] || status[0] || RESET || pump_active_s == 1'b1) begin
-      por_reset_s <= 1'b1;
-      flash_clk <= {23{1'b0}};
-    end
-    else
-	 begin
-      if(flash_clk[22] == 1'b1) begin
-        por_reset_s <= 1'b0;
-      end
-      flash_clk <= flash_clk + 2'b01;
-    end
-  end
+ // Resets and disk interface enable (rtl/reset_ctrl.sv, shared with the sim):
+ // cold reset boots the drive, F2 / OSD Warm reset = the TK2000 RESET keys.
+reg old_warm;
+always @(posedge clk_sys) old_warm <= status[18];
+
+reset_ctrl reset_ctrl
+(
+	.clk(clk_sys),
+	.cold_req(RESET | buttons[1] | status[0] | pump_active_s),
+	.warm_req(status[18] & ~old_warm),
+	.ps2_key(ps2_key),
+	.disk_mode(status[17:16]),
+	.d1_mounted(disk_mount[0]),
+	.d1_insert(img_mounted[0] && img_size != 0),
+	.d1_motor(fd_disk_1),
+	.por_reset(por_reset_s),
+	.reset(reset_s),
+	.disk_en(disk_en_s),
+	.warm_active(),
+	.empty_spin(disk_wait_s)
+);
 
 dpram  #( .addr_width_g(16),.data_width_g(8)) ram (
 	.address_a	(ram_addr),
 	.clock_a	(clock_28_s),
-	.clock_b	(~clock_2M_s),
 	.data_a		(ram_data),
 	.q_a		(ram_data_from_s),
-	.wren_a		(ram_we)
+	.wren_a		(ram_we),
+	// video reads on port B (separate from the CPU, so turbo doesn't disturb it)
+	.address_b	(video_ram_addr_s),
+	.clock_b	(clock_28_s),
+	.q_b		(video_ram_data_s)
 );
+
+// ---------------------------------------------------------------- settings
+// OSD standard: settings take effect at the next cold reset (Apply and reset,
+// the board's reset, a core load; not F2); media, Tape speed / overlay / audio
+// and the tape buttons act at once. Disk interface is latched in reset_ctrl.
+reg [31:0] cfg = 32'd0;
+always @(posedge clk_sys) if (por_reset_s) cfg <= status;
+wire cfg_pending = {status[17:16], status[6:5]} != {cfg[17:16], cfg[6:5]};
 
 assign ram_we = por_reset_s == 1'b0 ? ram_we_s : 1'b1;
 assign ram_data = por_reset_s == 1'b0 ? ram_data_to_s : 8'b00000000;
